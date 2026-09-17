@@ -332,55 +332,166 @@ with g2:
     )
     st.plotly_chart(fig_mu, use_container_width=True)
 
+fig_z = go.Figure()
+fig_z.add_trace(go.Scatter(x=df_display[p_col], y=df_display["Z, -"],
+                            mode="lines+markers", name="Z", line=dict(color="purple")))
+_add_pb_line(fig_z)
+fig_z.update_layout(title="Коэффициент сверхсжимаемости газа Z(P)", xaxis_title=p_axis_title,
+                     yaxis_title="Z, -", hovermode="x unified")
+st.plotly_chart(fig_z, use_container_width=True)
+
 # ---------------------------------------------------------------------------
-# Этап 5: загрузка лабораторных данных и сравнение
+# Этап 5: загрузка лабораторного PVT-отчёта и сравнение
 # ---------------------------------------------------------------------------
 st.markdown("---")
-st.subheader("Сравнение с лабораторными данными (опционально)")
-
-lab_units = st.radio("Единицы измерения в загружаемом файле",
-                      options=["Метрическая (бар, м³/м³)", "Field units (psi, scf/stb, bbl/stb)"],
-                      index=0, horizontal=True)
-lab_file = st.file_uploader(
-    "Загрузить CSV с лабораторными PVT-данными "
-    "(колонки: P, Rs, Bo — названия любые, главное порядок)",
-    type=["csv"],
+st.subheader("Сравнение с лабораторным PVT-отчётом (опционально)")
+st.caption(
+    "Поддерживаются два типа лабораторных данных: дифференциальное разгазирование "
+    "(Differential Liberation, DL) — таблица P/Rs/Bo/Bg/μo/μg/Z по ступеням давления "
+    "при пластовой температуре, и сепараторный (flash) тест — GOR/Bo по ступеням сепарации "
+    "с итоговыми свойствами товарной нефти."
 )
 
-if lab_file is not None:
+# Распознавание колонок отчёта по названию (гибко: рус/англ, любой порядок колонок)
+_DL_COLUMN_ALIASES = {
+    "p": ["p", "давление", "pressure"],
+    "rs": ["rs", "gor", "газосодержание", "растворенныйгаз", "растворённыйгаз"],
+    "bo": ["bo", "boi", "bod", "объемныйкоэффициентнефти", "объёмныйкоэффициентнефти"],
+    "bg": ["bg", "объемныйкоэффициентгаза", "объёмныйкоэффициентгаза"],
+    "bt": ["bt", "boi2", "двухфазныйкоэффициент", "totalfvf"],
+    "muo": ["muo", "mo", "oilviscosity", "вязкостьнефти"],
+    "mug": ["mug", "gasviscosity", "вязкостьгаза"],
+    "z": ["z", "zfactor", "zфактор", "коэффициентсверхсжимаемости"],
+}
+
+
+def _normalize_header(col: str) -> str:
+    """Нормализует заголовок колонки: берёт часть до запятой/скобки, убирает
+    все символы кроме букв и цифр, приводит к нижнему регистру."""
+    head = str(col).split(",")[0].split("(")[0]
+    return "".join(ch for ch in head.lower() if ch.isalnum())
+
+
+def _match_dl_columns(df: pd.DataFrame) -> dict[str, str]:
+    """Сопоставляет колонки лабораторного DL-отчёта с внутренними ключами
+    (p, rs, bo, bg, bt, muo, mug, z) по названию, а не по порядковому номеру."""
+    matched: dict[str, str] = {}
+    for col in df.columns:
+        norm = _normalize_header(col)
+        for key, aliases in _DL_COLUMN_ALIASES.items():
+            if key in matched:
+                continue
+            if norm in aliases:
+                matched[key] = col
+                break
+    return matched
+
+
+st.markdown("**1. Дифференциальное разгазирование (Differential Liberation)**")
+dl_units = st.radio("Единицы измерения в файле DL-отчёта",
+                     options=["Метрическая (бар, м³/м³)", "Field units (psi, scf/stb, bbl/stb)"],
+                     index=0, horizontal=True, key="dl_units")
+dl_file = st.file_uploader(
+    "Загрузить CSV с DL-отчётом (колонки узнаются по названию: P, Rs, Bo, Bg, "
+    "mu_o, mu_g, Z — можно в любом порядке и не все сразу)",
+    type=["csv"], key="dl_uploader",
+)
+
+if dl_file is not None:
     try:
-        df_lab = pd.read_csv(lab_file)
-        lab_is_metric = lab_units.startswith("Метрическая")
+        df_dl = pd.read_csv(dl_file)
+        dl_is_metric = dl_units.startswith("Метрическая")
+        cols = _match_dl_columns(df_dl)
 
-        p_lab_raw = df_lab.iloc[:, 0].astype(float)
-        rs_lab_raw = df_lab.iloc[:, 1].astype(float) if df_lab.shape[1] > 1 else None
-        bo_lab_raw = df_lab.iloc[:, 2].astype(float) if df_lab.shape[1] > 2 else None
-
-        if lab_is_metric:
-            p_lab_display = p_lab_raw if is_metric else p_lab_raw.apply(u.bar_to_psi)
-            rs_lab_display = (rs_lab_raw if is_metric else rs_lab_raw.apply(u.rs_m3m3_to_scf_stb)) \
-                if rs_lab_raw is not None else None
-            bo_lab_display = (bo_lab_raw if is_metric else bo_lab_raw.apply(u.bo_m3m3_to_bbl_stb)) \
-                if bo_lab_raw is not None else None
+        if "p" not in cols:
+            st.error("В файле не найдена колонка давления (P). Проверьте заголовки.")
         else:
-            p_lab_display = p_lab_raw.apply(u.psi_to_bar) if is_metric else p_lab_raw
-            rs_lab_display = (rs_lab_raw.apply(u.rs_scf_stb_to_m3m3) if is_metric else rs_lab_raw) \
-                if rs_lab_raw is not None else None
-            bo_lab_display = (bo_lab_raw.apply(u.bo_bbl_stb_to_m3m3) if is_metric else bo_lab_raw) \
-                if bo_lab_raw is not None else None
+            p_raw = df_dl[cols["p"]].astype(float)
+            p_disp = (p_raw if dl_is_metric == is_metric else
+                      (p_raw.apply(u.bar_to_psi) if dl_is_metric else p_raw.apply(u.psi_to_bar)))
 
-        if rs_lab_display is not None:
-            fig_rs.add_trace(go.Scatter(x=p_lab_display, y=rs_lab_display, mode="markers",
-                                         name="Rs (лаб.)", marker=dict(size=10, symbol="diamond")))
-            st.plotly_chart(fig_rs, use_container_width=True, key="rs_with_lab")
-        if bo_lab_display is not None:
-            fig_bo.add_trace(go.Scatter(x=p_lab_display, y=bo_lab_display, mode="markers",
-                                         name="Bo (лаб.)", marker=dict(size=10, symbol="diamond")))
-            st.plotly_chart(fig_bo, use_container_width=True, key="bo_with_lab")
+            def _conv(raw: pd.Series, m2f, f2m):
+                if dl_is_metric == is_metric:
+                    return raw
+                return raw.apply(m2f) if dl_is_metric else raw.apply(f2m)
 
-        st.success("Лабораторные данные наложены на графики выше.")
+            overlays = []  # (fig, column_key, label, converted_series)
+            if "rs" in cols:
+                rs_disp = _conv(df_dl[cols["rs"]].astype(float),
+                                 u.rs_m3m3_to_scf_stb, u.rs_scf_stb_to_m3m3)
+                overlays.append((fig_rs, "Rs (лаб. DL)", rs_disp))
+            if "bo" in cols:
+                bo_disp = _conv(df_dl[cols["bo"]].astype(float),
+                                 u.bo_m3m3_to_bbl_stb, u.bo_bbl_stb_to_m3m3)
+                overlays.append((fig_bo, "Bo (лаб. DL)", bo_disp))
+            if "bg" in cols:
+                bg_disp = _conv(df_dl[cols["bg"]].astype(float),
+                                 u.bg_m3m3_to_rcf_scf, u.bg_rcf_scf_to_m3m3)
+                overlays.append((fig_bg, "Bg (лаб. DL)", bg_disp))
+            if "muo" in cols:
+                muo_disp = df_dl[cols["muo"]].astype(float)  # сПз = сПз, конвертация не нужна
+                overlays.append((fig_mu, "μo (лаб. DL)", muo_disp))
+            if "mug" in cols:
+                mug_disp = df_dl[cols["mug"]].astype(float)
+                fig_mu.add_trace(go.Scatter(x=p_disp, y=mug_disp, mode="markers", yaxis="y2",
+                                             name="μg (лаб. DL)", marker=dict(size=9, symbol="x")))
+            if "z" in cols:
+                z_disp = df_dl[cols["z"]].astype(float)
+                overlays.append((fig_z, "Z (лаб. DL)", z_disp))
+
+            for fig, label, series in overlays:
+                fig.add_trace(go.Scatter(x=p_disp, y=series, mode="markers", name=label,
+                                          marker=dict(size=10, symbol="diamond")))
+
+            for fig, key in [(fig_rs, "rs"), (fig_bo, "bo"), (fig_bg, "bg"),
+                              (fig_mu, "mu"), (fig_z, "z")]:
+                st.plotly_chart(fig, use_container_width=True, key=f"{key}_with_dl")
+
+            found_props = ", ".join(k.upper() for k in cols if k != "p")
+            st.success(f"Лабораторные точки DL наложены на графики: {found_props or '—'}.")
+            if not found_props:
+                st.warning("Кроме давления, ни одна распознанная величина (Rs, Bo, Bg, mu_o, "
+                           "mu_g, Z) не найдена — проверьте заголовки колонок.")
     except Exception as e:
-        st.error(f"Не удалось прочитать файл: {e}")
+        st.error(f"Не удалось прочитать DL-файл: {e}")
+
+st.markdown("**2. Сепараторный (flash) тест**")
+st.caption(
+    "Данные по ступеням сепарации (давление/температура сепаратора, GOR и Bo каждой "
+    "ступени) и итоговые свойства товарной нефти. Пока отображается как таблица для "
+    "справки — используется, например, чтобы привести Rsb/Bob дифф. разгазирования "
+    "к условиям промысловой сепарации (flash-коррекция)."
+)
+sep_units = st.radio("Единицы измерения в файле сепараторного теста",
+                      options=["Метрическая (бар, м³/м³)", "Field units (psi, scf/stb, bbl/stb)"],
+                      index=0, horizontal=True, key="sep_units")
+sep_file = st.file_uploader(
+    "Загрузить CSV сепараторного теста (колонки, например: Stage, P_sep, T_sep, GOR, Bo)",
+    type=["csv"], key="sep_uploader",
+)
+
+if sep_file is not None:
+    try:
+        df_sep = pd.read_csv(sep_file)
+        sep_is_metric = sep_units.startswith("Метрическая")
+        st.dataframe(df_sep, use_container_width=True)
+
+        gor_col = next((c for c in df_sep.columns
+                        if _normalize_header(c) in ("gor", "rs", "газосодержание")), None)
+        if gor_col is not None:
+            gor_total_raw = df_sep[gor_col].astype(float).sum()
+            if sep_is_metric == is_metric:
+                gor_total = gor_total_raw
+            elif sep_is_metric:
+                gor_total = u.rs_m3m3_to_scf_stb(gor_total_raw)
+            else:
+                gor_total = u.rs_scf_stb_to_m3m3(gor_total_raw)
+            unit_label = "м³/м³" if is_metric else "scf/stb"
+            st.metric("Суммарный GOR по ступеням сепарации", f"{gor_total:.1f} {unit_label}")
+        else:
+            st.info("Колонка GOR/Rs по ступеням не найдена — показана только таблица как есть.")
+    except Exception as e:
+        st.error(f"Не удалось прочитать файл сепараторного теста: {e}")
 
 # ---------------------------------------------------------------------------
 # Экспорт таблицы
