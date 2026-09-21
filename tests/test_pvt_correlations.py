@@ -242,6 +242,54 @@ class TestGasCorrelations:
 
 
 # ---------------------------------------------------------------------------
+# 8. Коррекция Wichert-Aziz для кислого газа (H2S, CO2)
+# ---------------------------------------------------------------------------
+class TestWichertAziz:
+    def test_zero_impurities_no_correction(self):
+        ppc, tpc = pvt.pseudo_critical_properties_standing(GAMMA_G)
+        ppc_c, tpc_c = pvt.wichert_aziz_correction(ppc, tpc, y_h2s=0, y_co2=0)
+        assert ppc_c == pytest.approx(ppc)
+        assert tpc_c == pytest.approx(tpc)
+
+    def test_sour_gas_reduces_critical_properties(self):
+        # Оба Ppc и Tpc должны снижаться при наличии H2S/CO2
+        ppc, tpc = pvt.pseudo_critical_properties_standing(0.65)
+        ppc_c, tpc_c = pvt.wichert_aziz_correction(ppc, tpc, y_h2s=0.144, y_co2=0.0319)
+        assert ppc_c < ppc
+        assert tpc_c < tpc
+
+    def test_correction_increases_with_h2s_content(self):
+        # Регрессия на реальных данных Королёвского месторождения (Казахстан,
+        # H2S~14.4 мол.%, CO2~3.19 мол.%) — проверено вручную при разработке
+        ppc, tpc = pvt.pseudo_critical_properties_standing(0.65)
+        ppc_c, tpc_c = pvt.wichert_aziz_correction(ppc, tpc, y_h2s=0.144, y_co2=0.0319)
+        assert tpc_c == pytest.approx(350.6, rel=1e-2)
+        assert ppc_c == pytest.approx(624.2, rel=1e-2)
+
+    def test_more_h2s_means_larger_correction(self):
+        ppc, tpc = pvt.pseudo_critical_properties_standing(0.65)
+        _, tpc_low = pvt.wichert_aziz_correction(ppc, tpc, y_h2s=0.02, y_co2=0.01)
+        _, tpc_high = pvt.wichert_aziz_correction(ppc, tpc, y_h2s=0.15, y_co2=0.03)
+        assert (tpc - tpc_high) > (tpc - tpc_low)
+
+    def test_z_factor_changes_meaningfully_for_sour_gas(self):
+        # На реальных пластовых условиях Королёвского месторождения
+        # (P~3660 psi, T~73°C) коррекция Z-фактора не пренебрежимо мала
+        ppc, tpc = pvt.pseudo_critical_properties_standing(0.65)
+        t_f = 73 * 9 / 5 + 32
+        p_psi = 3660
+
+        ppr, tpr = pvt.reduced_properties(p_psi, t_f, ppc, tpc)
+        z_sweet = pvt.z_factor_dak(ppr, tpr)
+
+        ppc_c, tpc_c = pvt.wichert_aziz_correction(ppc, tpc, y_h2s=0.144, y_co2=0.0319)
+        ppr_c, tpr_c = pvt.reduced_properties(p_psi, t_f, ppc_c, tpc_c)
+        z_sour = pvt.z_factor_dak(ppr_c, tpr_c)
+
+        assert abs(z_sour / z_sweet - 1) > 0.02  # >2% разницы — не шум
+
+
+# ---------------------------------------------------------------------------
 # 7. Вода — Bw, вязкость, сжимаемость
 # ---------------------------------------------------------------------------
 class TestWaterCorrelations:

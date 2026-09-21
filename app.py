@@ -72,6 +72,15 @@ gamma_g = st.sidebar.number_input(
     min_value=0.55, max_value=1.70, value=0.75, step=0.01,
 )
 
+with st.sidebar.expander("Кислый газ H2S/CO2 (коррекция Wichert-Aziz)", expanded=False):
+    st.caption("Для месторождений с сероводородом/CO2 в газе (например, Тенгиз, "
+               "Королёвское) — по умолчанию 0% (обычный «сладкий» газ, поправка "
+               "не применяется).")
+    h2s_mol_pct = st.number_input("H2S, мол.%", min_value=0.0, max_value=80.0,
+                                   value=0.0, step=0.1)
+    co2_mol_pct = st.number_input("CO2, мол.%", min_value=0.0, max_value=80.0,
+                                   value=0.0, step=0.1)
+
 st.sidebar.subheader("Температура")
 if is_metric:
     t_c = st.sidebar.number_input("Пластовая температура, °C", min_value=10.0,
@@ -187,6 +196,11 @@ p_values_psi = np.arange(p_min_psi, p_max_psi + p_step_psi / 2, p_step_psi)
 p_values_psi = p_values_psi[p_values_psi > 0]
 
 ppc_psi, tpc_r = pvt.pseudo_critical_properties_standing(gamma_g)
+tpc_r_sweet = tpc_r  # до коррекции на кислый газ, для отображения в UI
+if h2s_mol_pct > 0 or co2_mol_pct > 0:
+    ppc_psi, tpc_r = pvt.wichert_aziz_correction(
+        ppc_psi, tpc_r, y_h2s=h2s_mol_pct / 100.0, y_co2=co2_mol_pct / 100.0
+    )
 
 rows = []
 for p_psi in p_values_psi:
@@ -279,6 +293,15 @@ with col1:
 with col2:
     st.metric("Плотность нефти",
               f"{rho_kgm3:.1f} кг/м³ ({api:.1f} °API)")
+
+if h2s_mol_pct > 0 or co2_mol_pct > 0:
+    delta_tpc_c = (tpc_r - tpc_r_sweet) * 5.0 / 9.0  # градус R = градус F по величине
+    st.info(
+        f"Применена коррекция Wichert-Aziz на кислый газ (H2S={h2s_mol_pct:.1f}%, "
+        f"CO2={co2_mol_pct:.1f}%): псевдокритическая температура Tpc "
+        f"скорректирована на {delta_tpc_c:.1f} °C — это влияет на Z-фактор, "
+        f"Bg и вязкость газа."
+    )
 
 st.subheader("Таблица PVT-свойств")
 st.dataframe(df_display.style.format(precision=4), use_container_width=True)
