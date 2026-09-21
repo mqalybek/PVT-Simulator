@@ -341,6 +341,60 @@ fig_z.update_layout(title="Коэффициент сверхсжимаемост
 st.plotly_chart(fig_z, use_container_width=True)
 
 # ---------------------------------------------------------------------------
+# Калибровка (tuning) по факту — если сохранена на странице "Анализ месторождения"
+# ---------------------------------------------------------------------------
+tuning = st.session_state.get("pvt_tuning")
+if tuning:
+    st.markdown("---")
+    st.subheader("Калибровка по фактическим данным")
+    st.info(
+        f"Применена калибровка Standing/Beggs-Robinson по данным: **{tuning['source']}** "
+        f"(рассчитана на странице «Анализ месторождения»). Коэффициенты: "
+        f"Pb ×{tuning['factor_pb']:.3f}, Bo ×{tuning['factor_bo']:.3f}, "
+        f"μo ×{tuning['factor_mu']:.3f}."
+    )
+    tune_col1, tune_col2 = st.columns([3, 1])
+    with tune_col1:
+        show_tuned = st.checkbox("Показать откалиброванную кривую на графиках выше", value=True)
+    with tune_col2:
+        if st.button("Сбросить калибровку"):
+            del st.session_state["pvt_tuning"]
+            st.rerun()
+
+    if show_tuned:
+        pb_psi_tuned = pb_psi * tuning["factor_pb"]
+        rows_tuned = []
+        for p_psi_t in p_values_psi:
+            rs_t = pvt.rs_standing(p_psi_t, pb_psi_tuned, rsb_scf_stb, gamma_g, api, t_f)
+            co_t = (pvt.co_vasquez_beggs(p_psi_t, rsb_scf_stb, gamma_g, api, t_f)
+                    if p_psi_t > pb_psi_tuned else None)
+            bo_t = pvt.bo_standing(p_psi_t, pb_psi_tuned, rs_t, rsb_scf_stb,
+                                    gamma_g, gamma_o, t_f, co_t) * tuning["factor_bo"]
+            mu_t = pvt.mu_oil(p_psi_t, pb_psi_tuned, rs_t, rsb_scf_stb, api, t_f) * tuning["factor_mu"]
+            rows_tuned.append(dict(p_psi=p_psi_t, rs=rs_t, bo=bo_t, mu=mu_t))
+        df_tuned = pd.DataFrame(rows_tuned)
+
+        p_tuned_display = df_tuned["p_psi"].apply(u.psi_to_bar) if is_metric else df_tuned["p_psi"]
+        rs_tuned_display = df_tuned["rs"].apply(u.rs_scf_stb_to_m3m3) if is_metric else df_tuned["rs"]
+        bo_tuned_display = df_tuned["bo"].apply(u.bo_bbl_stb_to_m3m3) if is_metric else df_tuned["bo"]
+        mu_tuned_display = df_tuned["mu"]  # сПз = cP, конвертация не нужна
+
+        fig_rs.add_trace(go.Scatter(x=p_tuned_display, y=rs_tuned_display, mode="lines",
+                                     name="Rs (с калибровкой)", line=dict(color="darkred", dash="dot")))
+        fig_bo.add_trace(go.Scatter(x=p_tuned_display, y=bo_tuned_display, mode="lines",
+                                     name="Bo (с калибровкой)", line=dict(color="darkgreen", dash="dot")))
+        fig_mu.add_trace(go.Scatter(x=p_tuned_display, y=mu_tuned_display, mode="lines",
+                                     name="μo (с калибровкой)", line=dict(color="black", dash="dot")))
+
+        tc1, tc2, tc3 = st.columns(3)
+        with tc1:
+            st.plotly_chart(fig_rs, use_container_width=True, key="rs_with_tuning")
+        with tc2:
+            st.plotly_chart(fig_bo, use_container_width=True, key="bo_with_tuning")
+        with tc3:
+            st.plotly_chart(fig_mu, use_container_width=True, key="mu_with_tuning")
+
+# ---------------------------------------------------------------------------
 # Этап 5: загрузка лабораторного PVT-отчёта и сравнение
 # ---------------------------------------------------------------------------
 st.markdown("---")
