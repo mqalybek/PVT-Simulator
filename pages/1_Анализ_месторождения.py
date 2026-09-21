@@ -387,14 +387,25 @@ else:
                    f"Beggs-Robinson (в данных месторождения плотность товарной "
                    f"нефти отдельно не измерена, задайте своё лучшее приближение)")
     with tcol2:
-        tuning_gamma_g = st.number_input("Отн. плотность газа γg", min_value=0.55,
-                                          max_value=1.70, value=0.80, step=0.01,
+        tuning_gamma_g = st.number_input("Отн. плотность газа γg (резервное значение)",
+                                          min_value=0.55, max_value=1.70, value=0.80, step=0.01,
                                           key="tuning_gamma_g")
     with tcol3:
         scope_options = ["По всему отфильтрованному массиву"]
         if group_key:
             scope_options.append(f"По каждой группе ({fd.FIELD_LABELS[group_key]})")
         tuning_scope = st.selectbox("Считать коэффициенты", options=scope_options)
+
+    gas_density_available = "gas_rel_density" in mapping and df_filtered["gas_rel_density"].notna().any()
+    use_auto_gamma_g = st.checkbox(
+        "Брать γg из фактических замеров пробы (среднее по группе), а не из "
+        "поля выше — используется колонка «Плотность газа после однократного "
+        "разгазирования (по воздуху)», если она сопоставлена",
+        value=gas_density_available, disabled=not gas_density_available,
+    )
+    if not gas_density_available:
+        st.caption("В данных нет колонки относительной плотности газа — "
+                   "используется резервное значение γg из поля выше для всех групп.")
 
     tuning_gamma_o = u.rho_kgm3_to_sg(tuning_rho)
 
@@ -413,7 +424,15 @@ else:
     tuning_results = {}
     rows_summary = []
     for gname, gdf in groups_for_tuning:
-        res = pt.tune_group(gdf, tuning_api, tuning_gamma_g, tuning_gamma_o)
+        gamma_g_used = tuning_gamma_g
+        gamma_g_source = "вручную"
+        if use_auto_gamma_g and "gas_rel_density" in gdf.columns:
+            gamma_g_mean = gdf["gas_rel_density"].dropna().mean()
+            if pd.notna(gamma_g_mean):
+                gamma_g_used = float(gamma_g_mean)
+                gamma_g_source = f"факт, n={gdf['gas_rel_density'].notna().sum()}"
+
+        res = pt.tune_group(gdf, tuning_api, gamma_g_used, tuning_gamma_o)
         if res is None:
             continue
         tuning_results[gname] = res
@@ -422,6 +441,7 @@ else:
             if f:
                 rows_summary.append({
                     "Группа": gname, "Свойство": prop_label, "n": f["n"],
+                    "γg использован": f"{gamma_g_used:.3f} ({gamma_g_source})",
                     "Коэффициент": round(f["factor"], 4),
                     "MAPE до, %": round(f["mape_before"], 1),
                     "MAPE после, %": round(f["mape_after"], 1),
