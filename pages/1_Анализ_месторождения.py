@@ -134,29 +134,36 @@ if "pb" not in mapping and "p_sample" not in mapping:
 df_clean = fd.build_clean_dataframe(df_raw, mapping)
 
 st.subheader("3. Единицы давления и очистка данных")
-pressure_units = ["МПа", "бар", "psi"]
+pressure_units = ["МПа", "бар", "psi", "кгс/см²"]
 c1, c2 = st.columns(2)
 with c1:
-    source_p_unit = st.selectbox("Единица давления В ФАЙЛЕ", options=pressure_units, index=0)
+    source_p_unit = st.selectbox("Единица давления В ФАЙЛЕ", options=pressure_units, index=0,
+                                  help="«кгс/см²» (техническая атмосфера, «ата»/«ати») часто "
+                                       "встречается в старых советских/постсоветских отчётах.")
 with c2:
     display_p_unit = st.selectbox("Единица давления для отображения/графиков",
                                    options=pressure_units, index=0)
 
+_TO_MPA = {
+    "МПа": lambda v: v,
+    "бар": u.bar_to_mpa,
+    "psi": u.psi_to_mpa,
+    "кгс/см²": u.kgf_cm2_to_mpa,
+}
+_FROM_MPA = {
+    "МПа": lambda v: v,
+    "бар": u.mpa_to_bar,
+    "psi": u.mpa_to_psi,
+    "кгс/см²": u.mpa_to_kgf_cm2,
+}
+
 
 def _to_mpa(val: float, unit: str) -> float:
-    if unit == "МПа":
-        return val
-    if unit == "бар":
-        return u.bar_to_mpa(val)
-    return u.psi_to_mpa(val)
+    return _TO_MPA[unit](val)
 
 
 def _from_mpa(val: float, unit: str) -> float:
-    if unit == "МПа":
-        return val
-    if unit == "бар":
-        return u.mpa_to_bar(val)
-    return u.mpa_to_psi(val)
+    return _FROM_MPA[unit](val)
 
 
 for pcol in ("pb", "p_sample"):

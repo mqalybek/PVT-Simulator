@@ -56,6 +56,42 @@ def psi_to_mpa(p_psi: float) -> float:
     return bar_to_mpa(psi_to_bar(p_psi))
 
 
+# 1 кгс/см² (техническая атмосфера, "ата"/"ати") = 0.980665 бар — точное
+# определение (1 кгс/см² = 98066.5 Па = 0.980665·10^5 Па = 0.980665 бар).
+# Часто встречается в старых (советских/постсоветских) PVT-отчётах вместо
+# МПа или бар — особенно в материалах до 1990-х годов.
+KGF_CM2_TO_BAR = 0.980665
+
+def kgf_cm2_to_bar(p_kgf_cm2: float) -> float:
+    """Давление: кгс/см² -> бар."""
+    return p_kgf_cm2 * KGF_CM2_TO_BAR
+
+
+def bar_to_kgf_cm2(p_bar: float) -> float:
+    """Давление: бар -> кгс/см²."""
+    return p_bar / KGF_CM2_TO_BAR
+
+
+def kgf_cm2_to_psi(p_kgf_cm2: float) -> float:
+    """Давление: кгс/см² -> psi."""
+    return bar_to_psi(kgf_cm2_to_bar(p_kgf_cm2))
+
+
+def psi_to_kgf_cm2(p_psi: float) -> float:
+    """Давление: psi -> кгс/см²."""
+    return bar_to_kgf_cm2(psi_to_bar(p_psi))
+
+
+def kgf_cm2_to_mpa(p_kgf_cm2: float) -> float:
+    """Давление: кгс/см² -> МПа."""
+    return bar_to_mpa(kgf_cm2_to_bar(p_kgf_cm2))
+
+
+def mpa_to_kgf_cm2(p_mpa: float) -> float:
+    """Давление: МПа -> кгс/см²."""
+    return bar_to_kgf_cm2(mpa_to_bar(p_mpa))
+
+
 # ---------------------------------------------------------------------------
 # Температура
 # ---------------------------------------------------------------------------
@@ -216,6 +252,14 @@ def _run_self_tests() -> None:
     assert bar_to_mpa(10) == 1.0, "10 бар = 1 МПа"
     assert abs(mpa_to_psi(1) - 145.038) < 1e-2, "1 МПа ~ 145.04 psi"
     assert abs(psi_to_mpa(145.038) - 1) < 1e-2
+
+    assert abs(kgf_cm2_to_bar(1) - 0.980665) < 1e-6, "1 кгс/см2 = 0.980665 бар"
+    assert abs(bar_to_kgf_cm2(0.980665) - 1) < 1e-6
+    assert abs(kgf_cm2_to_psi(1) - 14.2233) < 1e-3, "1 кгс/см2 ~ 14.2233 psi"
+    assert abs(psi_to_kgf_cm2(14.2233) - 1) < 1e-3
+    assert abs(kgf_cm2_to_mpa(1) - 0.0980665) < 1e-6
+    assert abs(mpa_to_kgf_cm2(0.0980665) - 1) < 1e-6
+    assert abs(mpa_to_kgf_cm2(1) - 10.1972) < 1e-3, "1 МПа ~ 10.1972 кгс/см2"
 
     assert abs(c_to_f(0) - 32) < 1e-9, "0 C = 32 F"
     assert abs(c_to_f(100) - 212) < 1e-9, "100 C = 212 F"

@@ -28,6 +28,18 @@ class TestPressure:
     def test_mpa_psi_roundtrip(self):
         assert u.psi_to_mpa(u.mpa_to_psi(5.0)) == pytest.approx(5.0)
 
+    def test_kgf_cm2_to_bar(self):
+        assert u.kgf_cm2_to_bar(1) == pytest.approx(0.980665, rel=1e-6)
+
+    def test_bar_to_kgf_cm2_roundtrip(self):
+        assert u.bar_to_kgf_cm2(u.kgf_cm2_to_bar(20.0)) == pytest.approx(20.0)
+
+    def test_kgf_cm2_to_psi(self):
+        assert u.kgf_cm2_to_psi(1) == pytest.approx(14.2233, rel=1e-3)
+
+    def test_kgf_cm2_mpa_roundtrip(self):
+        assert u.mpa_to_kgf_cm2(u.kgf_cm2_to_mpa(15.0)) == pytest.approx(15.0)
+
 
 class TestTemperature:
     def test_freezing_point(self):
