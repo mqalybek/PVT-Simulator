@@ -34,6 +34,28 @@ def psi_to_bar(p_psi: float) -> float:
     return p_psi / BAR_TO_PSI
 
 
+# 1 МПа = 10 бар (точно, по определению: 1 МПа = 1e6 Па, 1 бар = 1e5 Па).
+# МПа часто встречается в казахстанских лабораторных PVT-отчётах вместо бар.
+def mpa_to_bar(p_mpa: float) -> float:
+    """Давление: МПа -> бар (точно 1 МПа = 10 бар)."""
+    return p_mpa * 10.0
+
+
+def bar_to_mpa(p_bar: float) -> float:
+    """Давление: бар -> МПа."""
+    return p_bar / 10.0
+
+
+def mpa_to_psi(p_mpa: float) -> float:
+    """Давление: МПа -> psi."""
+    return bar_to_psi(mpa_to_bar(p_mpa))
+
+
+def psi_to_mpa(p_psi: float) -> float:
+    """Давление: psi -> МПа."""
+    return bar_to_mpa(psi_to_bar(p_psi))
+
+
 # ---------------------------------------------------------------------------
 # Температура
 # ---------------------------------------------------------------------------
@@ -189,6 +211,11 @@ def salinity_ppm_to_wt_pct(salinity_ppm: float) -> float:
 def _run_self_tests() -> None:
     assert abs(bar_to_psi(1) - 14.5038) < 1e-3, "bar_to_psi(1) должен быть ~14.5038"
     assert abs(psi_to_bar(14.5038) - 1) < 1e-3, "psi_to_bar(14.5038) должен быть ~1"
+
+    assert mpa_to_bar(1) == 10.0, "1 МПа = 10 бар"
+    assert bar_to_mpa(10) == 1.0, "10 бар = 1 МПа"
+    assert abs(mpa_to_psi(1) - 145.038) < 1e-2, "1 МПа ~ 145.04 psi"
+    assert abs(psi_to_mpa(145.038) - 1) < 1e-2
 
     assert abs(c_to_f(0) - 32) < 1e-9, "0 C = 32 F"
     assert abs(c_to_f(100) - 212) < 1e-9, "100 C = 212 F"
