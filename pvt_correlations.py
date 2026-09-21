@@ -29,6 +29,8 @@ pvt_correlations.py — классические PVT-корреляции Black 
 
 from __future__ import annotations
 
+import math
+
 import numpy as np
 
 # ---------------------------------------------------------------------------
@@ -295,6 +297,155 @@ def co_vasquez_beggs(p_psi: float, rsb_scf_stb: float, gamma_g: float,
         / (1e5 * p_psi)
     )
     return co_per_psi
+
+
+# ===========================================================================
+# ЭТАП 1б: альтернативные корреляции Pb/Rs/Bo — Glaso (1980), Petrosky-Farshad
+# (1993) — для выбора в UI и сравнения со Standing. Вязкость и сжимаемость
+# остаются общими (Beggs-Robinson / Vasquez-Beggs) независимо от выбора —
+# это стандартная практика, у большинства авторов нет собственных корреляций
+# на все свойства сразу.
+# ===========================================================================
+
+# ---------------------------------------------------------------------------
+# Glaso (1980) — разработана на 45 пробах, преимущественно Северное море
+# ---------------------------------------------------------------------------
+def pb_glaso(rsb_scf_stb: float, gamma_g: float, api: float, t_f: float) -> float:
+    """
+    Давление насыщения Pb — корреляция Glaso (1980).
+
+    Диапазон применимости (field units):
+        API: 22 - 48.1
+        Pb: 165 - 7142 psi
+    Диапазон в метрике: плотность нефти ~790 - 920 кг/м3, Pb ~11 - 492 бар
+
+    Параметры и возврат — см. pb_standing().
+    """
+    if rsb_scf_stb <= 0:
+        return 14.7
+
+    x = (rsb_scf_stb / gamma_g) ** 0.816 * t_f ** 0.172 / api ** 0.989
+    log_x = math.log10(x)
+    pb_psi = 10 ** (1.7669 + 1.7447 * log_x - 0.30218 * log_x ** 2)
+    return max(pb_psi, 14.7)
+
+
+def rs_glaso(p_psi: float, pb_psi: float, rsb_scf_stb: float,
+             gamma_g: float, api: float, t_f: float) -> float:
+    """
+    Газосодержание Rs(P) — корреляция Glaso (1980), получена обращением
+    формулы pb_glaso() относительно давления (см. pb_glaso() для формулы).
+
+    Параметры и возврат — см. rs_standing().
+    """
+    if p_psi >= pb_psi:
+        return rsb_scf_stb
+
+    p_eff = max(p_psi, 14.7)
+    log_p = math.log10(p_eff)
+    # Обращение квадратного уравнения log(P) = 1.7669 + 1.7447*y - 0.30218*y^2
+    # относительно y = log10(X), т.е. 0.30218*y^2 - 1.7447*y + (log(P)-1.7669) = 0;
+    # берём физическую (меньшую) ветвь корня
+    discriminant = 1.7447 ** 2 - 4 * 0.30218 * (log_p - 1.7669)
+    discriminant = max(discriminant, 0.0)
+    y = (1.7447 - math.sqrt(discriminant)) / (2 * 0.30218)
+    x = 10 ** y
+    rs_scf_stb = gamma_g * (x * api ** 0.989 / t_f ** 0.172) ** (1 / 0.816)
+    return max(rs_scf_stb, 0.0)
+
+
+def bo_glaso(p_psi: float, pb_psi: float, rs_scf_stb: float, rsb_scf_stb: float,
+             gamma_g: float, gamma_o: float, t_f: float,
+             co_per_psi: float | None = None) -> float:
+    """
+    Объёмный коэффициент нефти Bo(P) — корреляция Glaso (1980).
+
+    Диапазон применимости (field units): те же условия, что и pb_glaso().
+    Выше Pb используется та же коррекция на сжимаемость, что и в bo_standing()
+    (Vasquez-Beggs Co) — отдельной формулы Co у Glaso в этом модуле нет.
+
+    Параметры и возврат — см. bo_standing().
+    """
+    bob_star = rs_scf_stb * (gamma_g / gamma_o) ** 0.526 + 0.968 * t_f
+    log_bob_star = math.log10(bob_star)
+    bob_bbl_stb = 1.0 + 10 ** (
+        -6.58511 + 2.91329 * log_bob_star - 0.27683 * log_bob_star ** 2
+    )
+
+    if p_psi <= pb_psi:
+        return bob_bbl_stb
+
+    if co_per_psi is None:
+        raise ValueError("Для P > Pb необходимо передать co_per_psi (сжимаемость нефти)")
+
+    return bob_bbl_stb * np.exp(co_per_psi * (pb_psi - p_psi))
+
+
+# ---------------------------------------------------------------------------
+# Petrosky-Farshad (1993) — разработана на нефтях Мексиканского залива
+# ---------------------------------------------------------------------------
+def pb_petrosky_farshad(rsb_scf_stb: float, gamma_g: float, api: float, t_f: float) -> float:
+    """
+    Давление насыщения Pb — корреляция Petrosky-Farshad (1993).
+
+    Диапазон применимости (field units):
+        API: 16.3 - 45
+    Диапазон в метрике: плотность нефти ~800 - 955 кг/м3
+
+    Параметры и возврат — см. pb_standing().
+    """
+    if rsb_scf_stb <= 0:
+        return 14.7
+
+    x = 7.916e-4 * api ** 1.5410 - 4.561e-5 * t_f ** 1.3911
+    pb_psi = 112.727 * (rsb_scf_stb ** 0.5774 / gamma_g ** 0.8439) * 10 ** x - 1391.051
+    return max(pb_psi, 14.7)
+
+
+def rs_petrosky_farshad(p_psi: float, pb_psi: float, rsb_scf_stb: float,
+                         gamma_g: float, api: float, t_f: float) -> float:
+    """
+    Газосодержание Rs(P) — корреляция Petrosky-Farshad (1993), получена
+    обращением формулы pb_petrosky_farshad() относительно давления.
+
+    Параметры и возврат — см. rs_standing().
+    """
+    if p_psi >= pb_psi:
+        return rsb_scf_stb
+
+    p_eff = max(p_psi, 14.7)
+    x = 7.916e-4 * api ** 1.5410 - 4.561e-5 * t_f ** 1.3911
+    rs_scf_stb = (
+        (p_eff + 1391.051) / 112.727 * gamma_g ** 0.8439 * 10 ** (-x)
+    ) ** (1 / 0.5774)
+    return max(rs_scf_stb, 0.0)
+
+
+def bo_petrosky_farshad(p_psi: float, pb_psi: float, rs_scf_stb: float, rsb_scf_stb: float,
+                         gamma_g: float, gamma_o: float, t_f: float,
+                         co_per_psi: float | None = None) -> float:
+    """
+    Объёмный коэффициент нефти Bo(P) — корреляция Petrosky-Farshad (1993).
+
+    Диапазон применимости (field units): те же условия, что и
+    pb_petrosky_farshad(). Выше Pb используется та же коррекция на
+    сжимаемость, что и в bo_standing() (Vasquez-Beggs Co).
+
+    Параметры и возврат — см. bo_standing().
+    """
+    a = (
+        rs_scf_stb ** 0.3738 * (gamma_g ** 0.2914 / gamma_o ** 0.6265)
+        + 0.24626 * t_f ** 0.5371
+    ) ** 3.0936
+    bob_bbl_stb = 1.0113 + 7.2046e-5 * a
+
+    if p_psi <= pb_psi:
+        return bob_bbl_stb
+
+    if co_per_psi is None:
+        raise ValueError("Для P > Pb необходимо передать co_per_psi (сжимаемость нефти)")
+
+    return bob_bbl_stb * np.exp(co_per_psi * (pb_psi - p_psi))
 
 
 # ===========================================================================

@@ -290,6 +290,78 @@ class TestWichertAziz:
 
 
 # ---------------------------------------------------------------------------
+# 9. Альтернативные корреляции Pb/Rs/Bo — Glaso, Petrosky-Farshad
+# ---------------------------------------------------------------------------
+@pytest.mark.parametrize("pb_fn,rs_fn,bo_fn", [
+    (pvt.pb_glaso, pvt.rs_glaso, pvt.bo_glaso),
+    (pvt.pb_petrosky_farshad, pvt.rs_petrosky_farshad, pvt.bo_petrosky_farshad),
+])
+class TestAlternativeCorrelations:
+    """Общие инварианты, которые должны выполняться для ЛЮБОЙ корреляции
+    Pb/Rs/Bo — не только для Standing, но и для Glaso/Petrosky-Farshad."""
+
+    def test_rs_at_pb_equals_rsb(self, pb_fn, rs_fn, bo_fn):
+        # Round-trip: обращение формулы Pb->Rs должно вернуть исходный Rsb
+        pb = pb_fn(RSB, GAMMA_G, API, T_F)
+        rs_at_pb = rs_fn(pb - 0.001, pb, RSB, GAMMA_G, API, T_F)
+        assert rs_at_pb == pytest.approx(RSB, rel=1e-3)
+
+    def test_rs_equals_rsb_above_pb(self, pb_fn, rs_fn, bo_fn):
+        pb = pb_fn(RSB, GAMMA_G, API, T_F)
+        assert rs_fn(pb + 1000, pb, RSB, GAMMA_G, API, T_F) == pytest.approx(RSB)
+
+    def test_rs_monotonically_increases_below_pb(self, pb_fn, rs_fn, bo_fn):
+        pb = pb_fn(RSB, GAMMA_G, API, T_F)
+        pressures = [500, 1000, 1500, 2000]
+        rs_values = [rs_fn(p, pb, RSB, GAMMA_G, API, T_F) for p in pressures]
+        assert rs_values == sorted(rs_values)
+
+    def test_bo_above_one(self, pb_fn, rs_fn, bo_fn):
+        pb = pb_fn(RSB, GAMMA_G, API, T_F)
+        bo = bo_fn(pb, pb, RSB, RSB, GAMMA_G, GAMMA_O, T_F)
+        assert bo > 1.0
+
+    def test_bo_increases_with_pressure_below_pb(self, pb_fn, rs_fn, bo_fn):
+        pb = pb_fn(RSB, GAMMA_G, API, T_F)
+        pressures = [500, 1000, 1500, 2000]
+        bo_values = []
+        for p in pressures:
+            rs = rs_fn(p, pb, RSB, GAMMA_G, API, T_F)
+            bo_values.append(bo_fn(p, pb, rs, RSB, GAMMA_G, GAMMA_O, T_F))
+        assert bo_values == sorted(bo_values)
+
+    def test_bo_decreases_with_pressure_above_pb(self, pb_fn, rs_fn, bo_fn):
+        pb = pb_fn(RSB, GAMMA_G, API, T_F)
+        pressures = [pb + 200, pb + 500, pb + 1000]
+        bo_values = []
+        for p in pressures:
+            co = pvt.co_vasquez_beggs(p, RSB, GAMMA_G, API, T_F)
+            bo_values.append(bo_fn(p, pb, RSB, RSB, GAMMA_G, GAMMA_O, T_F, co))
+        assert bo_values == sorted(bo_values, reverse=True)
+
+    def test_bo_above_pb_requires_co(self, pb_fn, rs_fn, bo_fn):
+        pb = pb_fn(RSB, GAMMA_G, API, T_F)
+        with pytest.raises(ValueError):
+            bo_fn(pb + 100, pb, RSB, RSB, GAMMA_G, GAMMA_O, T_F)
+
+    def test_pb_positive(self, pb_fn, rs_fn, bo_fn):
+        assert pb_fn(RSB, GAMMA_G, API, T_F) > 14.7
+
+
+class TestGlasoRegression:
+    def test_pb_reference_case(self):
+        # API=35, γg=0.75, T=200F, Rsb=500 scf/stb — проверено вручную
+        pb = pvt.pb_glaso(RSB, GAMMA_G, API, T_F)
+        assert pb == pytest.approx(2498.4, rel=1e-3)
+
+
+class TestPetroskyFarshadRegression:
+    def test_pb_reference_case(self):
+        pb = pvt.pb_petrosky_farshad(RSB, GAMMA_G, API, T_F)
+        assert pb == pytest.approx(5417.2, rel=1e-3)
+
+
+# ---------------------------------------------------------------------------
 # 7. Вода — Bw, вязкость, сжимаемость
 # ---------------------------------------------------------------------------
 class TestWaterCorrelations:

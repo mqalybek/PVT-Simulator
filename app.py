@@ -92,9 +92,26 @@ else:
     t_c = u.f_to_c(t_f)
 
 st.sidebar.subheader("Давление насыщения / газосодержание")
+st.sidebar.subheader("Корреляция Pb/Rs/Bo")
+correlation_choice = st.sidebar.selectbox(
+    "Какую корреляцию использовать",
+    options=["Standing (1947)", "Glaso (1980)", "Petrosky-Farshad (1993)"],
+    index=0,
+    help="Standing — универсальная (California), Glaso — North Sea (API 22-48), "
+         "Petrosky-Farshad — Мексиканский залив (API 16-45). Вязкость и сжимаемость "
+         "нефти всегда считаются по Beggs-Robinson/Vasquez-Beggs независимо от выбора.",
+)
+CORRELATION_FUNCS = {
+    "Standing (1947)": (pvt.pb_standing, pvt.rs_standing, pvt.bo_standing),
+    "Glaso (1980)": (pvt.pb_glaso, pvt.rs_glaso, pvt.bo_glaso),
+    "Petrosky-Farshad (1993)": (pvt.pb_petrosky_farshad, pvt.rs_petrosky_farshad, pvt.bo_petrosky_farshad),
+}
+pb_fn, rs_fn, bo_fn = CORRELATION_FUNCS[correlation_choice]
+
 pb_mode = st.sidebar.radio(
     "Способ определения Pb",
-    options=["Рассчитать по корреляции Standing", "Задать из лабораторных данных"],
+    options=[f"Рассчитать по корреляции {correlation_choice.split(' (')[0]}",
+             "Задать из лабораторных данных"],
     index=0,
 )
 
@@ -111,14 +128,14 @@ else:
     )
     rsb_m3m3 = u.rs_scf_stb_to_m3m3(rsb_scf_stb)
 
-pb_calc_psi = pvt.pb_standing(rsb_scf_stb, gamma_g, api, t_f)
+pb_calc_psi = pb_fn(rsb_scf_stb, gamma_g, api, t_f)
 
-if pb_mode == "Рассчитать по корреляции Standing":
+if pb_mode.startswith("Рассчитать"):
     pb_psi = pb_calc_psi
     if is_metric:
-        st.sidebar.info(f"Pb (Standing) = {u.psi_to_bar(pb_psi):.1f} бар")
+        st.sidebar.info(f"Pb ({correlation_choice}) = {u.psi_to_bar(pb_psi):.1f} бар")
     else:
-        st.sidebar.info(f"Pb (Standing) = {pb_psi:.1f} psi")
+        st.sidebar.info(f"Pb ({correlation_choice}) = {pb_psi:.1f} psi")
 else:
     if is_metric:
         pb_bar = st.sidebar.number_input(
@@ -204,14 +221,14 @@ if h2s_mol_pct > 0 or co2_mol_pct > 0:
 
 rows = []
 for p_psi in p_values_psi:
-    rs_scf_stb = pvt.rs_standing(p_psi, pb_psi, rsb_scf_stb, gamma_g, api, t_f)
+    rs_scf_stb = rs_fn(p_psi, pb_psi, rsb_scf_stb, gamma_g, api, t_f)
 
     co_per_psi = None
     if p_psi > pb_psi:
         co_per_psi = pvt.co_vasquez_beggs(p_psi, rsb_scf_stb, gamma_g, api, t_f)
 
-    bo_bbl_stb = pvt.bo_standing(p_psi, pb_psi, rs_scf_stb, rsb_scf_stb,
-                                  gamma_g, gamma_o, t_f, co_per_psi)
+    bo_bbl_stb = bo_fn(p_psi, pb_psi, rs_scf_stb, rsb_scf_stb,
+                        gamma_g, gamma_o, t_f, co_per_psi)
     mu_o_cp = pvt.mu_oil(p_psi, pb_psi, rs_scf_stb, rsb_scf_stb, api, t_f)
 
     ppr, tpr = pvt.reduced_properties(p_psi, t_f, ppc_psi, tpc_r)
@@ -283,8 +300,9 @@ p_col = df_display.columns[0]
 # Основная область: таблица и графики
 # ---------------------------------------------------------------------------
 st.title("PVT-симулятор Black Oil модели")
-st.caption("Standing / Vasquez-Beggs / Beggs-Robinson / Dranchuk-Abou-Kassem / "
-           "Lee-Gonzalez-Eakin / McCain")
+st.caption(f"Pb/Rs/Bo: {correlation_choice} · вязкость/сжимаемость: Beggs-Robinson / "
+           f"Vasquez-Beggs · газ: Dranchuk-Abou-Kassem, Lee-Gonzalez-Eakin · "
+           f"вода: McCain")
 
 col1, col2 = st.columns([1, 1])
 with col1:
@@ -375,6 +393,9 @@ if tuning:
         f"(рассчитана на странице «Анализ месторождения»). Коэффициенты: "
         f"Pb ×{tuning['factor_pb']:.3f}, Bo ×{tuning['factor_bo']:.3f}, "
         f"μo ×{tuning['factor_mu']:.3f}."
+        + (f" Обратите внимание: калибровка всегда считается относительно Standing, "
+           f"даже если выше выбрана корреляция «{correlation_choice}»."
+           if correlation_choice != "Standing (1947)" else "")
     )
     tune_col1, tune_col2 = st.columns([3, 1])
     with tune_col1:

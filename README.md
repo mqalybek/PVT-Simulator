@@ -1,8 +1,8 @@
 # PVT-Simulator (Black Oil)
 
 Простой PVT-симулятор Black Oil модели на классических корреляциях
-(Standing, Vasquez-Beggs, Beggs-Robinson, Dranchuk-Abou-Kassem, Lee-Gonzalez-Eakin,
-McCain, Wichert-Aziz).
+(Standing, Glaso, Petrosky-Farshad — на выбор для Pb/Rs/Bo; Vasquez-Beggs,
+Beggs-Robinson, Dranchuk-Abou-Kassem, Lee-Gonzalez-Eakin, McCain, Wichert-Aziz).
 
 ## Структура проекта
 
@@ -144,3 +144,27 @@ CO2≈3.19 мол.%, `tests/test_pvt_correlations.py`, класс `TestWichertAz
 7%, а Z-фактор при пластовых условиях (~3660 psi, ~73°C) меняется больше чем
 на 2% — это не шум, а реальная и материальная поправка для сернистых
 месторождений. При H2S=CO2=0 поправка тождественно равна нулю.
+
+## Выбор корреляции Pb/Rs/Bo (Standing / Glaso / Petrosky-Farshad)
+
+На главной странице, в сайдбаре под «Корреляция Pb/Rs/Bo» — выпадающий
+список из трёх корреляций:
+- **Standing (1947)** — универсальная, California
+- **Glaso (1980)** — North Sea, точнее на диапазоне API 22-48
+- **Petrosky-Farshad (1993)** — Мексиканский залив, API 16-45
+
+Вязкость (Beggs-Robinson) и сжимаемость выше Pb (Vasquez-Beggs) считаются
+одинаково независимо от выбора — это стандартная практика, у большинства
+корреляций нет собственных формул на все свойства сразу.
+
+Как проверить: на одинаковом входе (API 35, γg 0.75, T 200°F, Rsb 500 scf/stb)
+три корреляции дают разный Pb (Standing ≈2205 psi, Glaso ≈2498 psi,
+Petrosky-Farshad ≈5417 psi) — это ожидаемо, корреляции построены на разных
+месторождениях мира и по-разному экстраполируются. В `pvt_correlations.py`
+для Glaso/Petrosky-Farshad формулы Rs(P) получены обращением формулы Pb —
+проверка на round-trip (Rs при P→Pb должен вернуть исходный Rsb) в
+`tests/test_pvt_correlations.py::TestAlternativeCorrelations`.
+
+Калибровка (tuning, см. раздел выше) всегда считается относительно Standing
+независимо от выбора корреляции — если выбрана другая, приложение об этом
+явно предупреждает под откалиброванной кривой.
