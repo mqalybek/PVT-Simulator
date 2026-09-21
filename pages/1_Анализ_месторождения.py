@@ -165,13 +165,52 @@ for pcol in ("pb", "p_sample"):
             lambda v: _from_mpa(_to_mpa(v, source_p_unit), display_p_unit) if pd.notna(v) else v
         )
 
-exclude_aggregates = st.checkbox(
-    f"Исключить агрегатные строки типа «Среднее значение: …» "
-    f"(найдено: {int(df_clean['is_aggregate'].sum())})",
-    value=True,
-)
+qc_col1, qc_col2 = st.columns(2)
+with qc_col1:
+    exclude_aggregates = st.checkbox(
+        f"Исключить агрегатные строки типа «Среднее значение: …» "
+        f"(найдено: {int(df_clean['is_aggregate'].sum())})",
+        value=True,
+    )
+with qc_col2:
+    n_anomalous = int(df_clean["is_anomalous"].sum())
+    exclude_anomalous = st.checkbox(
+        f"Исключить пробы, помеченные звёздочкой (*) как непредставительные "
+        f"(найдено: {n_anomalous})",
+        value=n_anomalous > 0,
+        disabled=n_anomalous == 0,
+    )
+
 if exclude_aggregates:
     df_clean = df_clean[~df_clean["is_aggregate"]].reset_index(drop=True)
+if exclude_anomalous:
+    df_clean = df_clean[~df_clean["is_anomalous"]].reset_index(drop=True)
+
+# Кросс-проверка Rs(м3/т) vs Rs(м3/м3) через материальный баланс и флаг
+# "P отбора ниже Pb" — не отбрасываем строки, только предупреждаем
+cross_check_issues = df_clean[df_clean["rs_cross_check_dev_pct"] > 5.0] \
+    if "rs_cross_check_dev_pct" in df_clean.columns else pd.DataFrame()
+p_below_pb_issues = df_clean[df_clean.get("p_below_pb", pd.Series(dtype=bool)) == True] \
+    if "p_below_pb" in df_clean.columns else pd.DataFrame()
+
+if not cross_check_issues.empty:
+    with st.expander(
+        f"⚠ {len(cross_check_issues)} проб(ы) с расхождением Rs(м³/т) и Rs(м³/м³) "
+        f"более 5% — возможна опечатка в исходных данных", expanded=False,
+    ):
+        cols_show = [c for c in ("horizon", "well", "rs_m3m3", "rs_m3t",
+                                  "rs_cross_check_dev_pct") if c in cross_check_issues.columns]
+        st.dataframe(cross_check_issues[cols_show].sort_values(
+            "rs_cross_check_dev_pct", ascending=False), use_container_width=True)
+
+if not p_below_pb_issues.empty:
+    with st.expander(
+        f"ℹ {len(p_below_pb_issues)} проб(ы) с давлением отбора ниже давления "
+        f"насыщения — при отборе в пласте уже мог идти двухфазный поток", expanded=False,
+    ):
+        cols_show = [c for c in ("horizon", "well", "pb", "p_sample")
+                     if c in p_below_pb_issues.columns]
+        st.dataframe(p_below_pb_issues[cols_show], use_container_width=True)
 
 # ---------------------------------------------------------------------------
 # 5. Фильтры (показываются только если соответствующее поле сопоставлено)
