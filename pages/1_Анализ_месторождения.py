@@ -21,6 +21,8 @@ import plotly.graph_objects as go
 import streamlit as st
 
 import field_data as fd
+import pvt_correlations as pvt
+import pvt_export as pex
 import pvt_tuning as pt
 import units as u
 
@@ -379,6 +381,7 @@ st.caption(
 
 required_tuning_fields = ["pb", "rs_m3m3", "bo", "mu_oil", "t_sample_c"]
 missing_tuning = [f for f in required_tuning_fields if f not in mapping]
+tuning_results: dict = {}
 
 if missing_tuning:
     st.warning("Для калибровки не хватает колонок: " +
@@ -525,3 +528,93 @@ export_df = df_filtered.rename(columns={k: _axis_label(k) if k in ("pb", "p_samp
 csv_bytes = export_df.to_csv(index=False).encode("utf-8-sig")
 st.download_button("Скачать отфильтрованную таблицу (CSV)", data=csv_bytes,
                     file_name="pvt_field_data_filtered.csv", mime="text/csv")
+
+# ---------------------------------------------------------------------------
+# 8. Экспорт в Eclipse/tNavigator (.GRDECL)
+# ---------------------------------------------------------------------------
+st.markdown("---")
+st.subheader("8. Экспорт в Eclipse/tNavigator (.GRDECL)")
+st.caption(
+    "Собирает PVTW/PVTO/PVDG/DENSITY/FILEUNIT — тот же формат, что подключается "
+    "в гидродинамическую модель. PVTO строится не одной кривой, а веером веток "
+    "по разным Rs (как требует формат), от своей точки насыщения до общего Pmax. "
+    "Основа — калибровка из раздела 6 (Standing + коэффициенты под факт)."
+)
+
+if not tuning_results:
+    st.info("Сначала посчитайте калибровку в разделе 6 — экспорт использует "
+             "её коэффициенты и параметры (API, γg, T).")
+else:
+    export_group = st.selectbox("Экспортировать группу", options=list(tuning_results.keys()),
+                                 key="export_group_select")
+    res_export = tuning_results[export_group]
+    dfp = res_export["df_pred"]
+
+    rsb_field_default = float(dfp["rs_m3m3"].median())
+    pb_mean_mpa = float(dfp["pb"].mean())
+    t_c_export = float(dfp["t_sample_c"].mean())
+
+    ecol1, ecol2, ecol3 = st.columns(3)
+    with ecol1:
+        rs_max_m3m3 = st.number_input("Верхняя граница сетки Rs, м³/м³", min_value=1.0,
+                                       value=round(rsb_field_default * 1.5, 1), step=1.0)
+        n_branches = st.number_input("Число веток Rs", min_value=3, max_value=30, value=12, step=1)
+    with ecol2:
+        p_max_bar = st.number_input("Pmax модели, бар", min_value=10.0, value=500.0, step=10.0)
+        n_points_per_branch = st.number_input("Точек давления на ветку", min_value=3,
+                                               max_value=20, value=8, step=1)
+    with ecol3:
+        p_ref_bar = st.number_input("Pref для PVTW, бар", min_value=1.0,
+                                     value=round(u.mpa_to_bar(pb_mean_mpa) + 20, 1), step=1.0)
+        salinity_export_ppm = st.number_input("Солёность пластовой воды, ppm", min_value=0.0,
+                                               value=250000.0, step=10000.0)
+
+    rho_water_kgm3 = st.number_input(
+        "Плотность пластовой воды, кг/м³ (вводится вручную — расчётной "
+        "корреляции по солёности в софте пока нет, бери из отдельного анализа воды)",
+        min_value=950.0, max_value=1300.0, value=1150.0, step=1.0,
+    )
+
+    with st.expander("Кислый газ H2S/CO2 (для PVDG)", expanded=False):
+        exp_h2s = st.number_input("H2S, мол.%", min_value=0.0, max_value=80.0,
+                                   value=0.0, step=0.1, key="exp_h2s")
+        exp_co2 = st.number_input("CO2, мол.%", min_value=0.0, max_value=80.0,
+                                   value=0.0, step=0.1, key="exp_co2")
+
+    if st.button("Сгенерировать .GRDECL"):
+        api_export = res_export["api"]
+        gamma_g_export = res_export["gamma_g"]
+        gamma_o_export = res_export["gamma_o"]
+        factor_pb = res_export["pb"]["factor"] if res_export["pb"] else 1.0
+        factor_bo = res_export["bo"]["factor"] if res_export["bo"] else 1.0
+        factor_mu = res_export["mu"]["factor"] if res_export["mu"] else 1.0
+
+        branches = pex.build_pvto_branches(
+            rsb_field_m3m3=rsb_field_default, api=api_export, gamma_g=gamma_g_export,
+            t_c=t_c_export, gamma_o=gamma_o_export,
+            pb_fn=pvt.pb_standing, rs_fn=pvt.rs_standing, bo_fn=pvt.bo_standing,
+            rs_max_m3m3=rs_max_m3m3, n_branches=int(n_branches), p_max_bar=p_max_bar,
+            n_points_per_branch=int(n_points_per_branch),
+            factor_pb=factor_pb, factor_bo=factor_bo, factor_mu=factor_mu,
+        )
+        pvdg_rows = pex.build_pvdg_table(gamma_g_export, t_c_export, p_max_bar=p_max_bar,
+                                          n_points=int(n_points_per_branch),
+                                          y_h2s=exp_h2s / 100.0, y_co2=exp_co2 / 100.0)
+        pvtw_record = pex.build_pvtw_record(p_ref_bar, t_c_export, salinity_export_ppm)
+        rho_oil_kgm3 = u.api_to_rho_kgm3(api_export)
+        rho_gas_kgm3 = gamma_g_export * 1.2232
+
+        grdecl_text = pex.format_grdecl(
+            pvtw_record, branches, pvdg_rows, rho_oil_kgm3, rho_water_kgm3, rho_gas_kgm3,
+        )
+
+        st.code(grdecl_text[:2500] + ("\n..." if len(grdecl_text) > 2500 else ""), language=None)
+        st.download_button("Скачать .GRDECL", data=grdecl_text.encode("utf-8"),
+                            file_name=f"{export_group}.GRDECL", mime="text/plain")
+        st.warning(
+            "Перед использованием в реальной модели проверь инженерным глазом: "
+            "(1) плотность воды задана вручную, не расчётом по солёности; "
+            "(2) сетка Rs равномерная, не подобрана под конкретную модель, как "
+            "в файлах, сгенерированных Petrel; (3) калибровка — только Standing, "
+            "даже если на калькуляторе выбрана другая корреляция."
+        )
