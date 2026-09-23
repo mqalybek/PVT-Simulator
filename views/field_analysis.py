@@ -367,6 +367,48 @@ else:
             trend_rows.append({"Группа": "весь массив", "n": len(plot_df),
                                 "Уравнение": res["equation"], "R²": round(res["r2"], 4)})
 
+# ---------------------------------------------------------------------------
+# Наложение кривой из уже существующего .GRDECL (например, выгруженного из
+# Fluid Model в Petrel/tNavigator) — сравнить, что заложено в модели, с
+# фактом. Работает для пар X=Pb, Y=Rs/Bo/μo — это ровно кривая точек
+# насыщения PVTO (первая строка каждой ветки Rs).
+# ---------------------------------------------------------------------------
+st.markdown("**Сравнить с моделью (.GRDECL)**")
+grdecl_model_file = st.file_uploader(
+    "Загрузить .GRDECL этого горизонта (Fluid Model из Petrel/tNavigator) — "
+    "наложит кривую модели поверх факта для пар Pb → Rs/Bo/μo",
+    type=["grdecl", "txt", "inc"], key="grdecl_model_uploader",
+)
+
+if grdecl_model_file is not None:
+    if x_field == "pb" and y_field in ("rs_m3m3", "bo", "mu_oil"):
+        grdecl_text = grdecl_model_file.getvalue().decode("utf-8", errors="ignore")
+        fileunit = pex.parse_fileunit(grdecl_text)
+        if fileunit != "METRIC":
+            st.warning(f"Файл в единицах {fileunit} — пока поддерживается только "
+                       f"METRIC (бар, м³/м³), наложение может быть неверным.")
+        sat_points = pex.parse_pvto_saturation_curve(grdecl_text)
+        if not sat_points:
+            st.warning("Не удалось найти PVTO в этом файле — проверьте, что это "
+                       "корректный .GRDECL с ключевым словом PVTO.")
+        else:
+            y_index = {"rs_m3m3": 0, "bo": 2, "mu_oil": 3}[y_field]
+            pb_display_values = [_from_mpa(_to_mpa(p[1], "бар"), display_p_unit)
+                                  for p in sat_points]
+            y_values = [p[y_index] for p in sat_points]
+            fig.add_trace(go.Scatter(
+                x=pb_display_values, y=y_values, mode="lines+markers",
+                name=f"Модель ({grdecl_model_file.name})",
+                line=dict(color="black", dash="dot"),
+                marker=dict(size=6, symbol="diamond"),
+            ))
+            st.success(f"Наложена модельная кривая из «{grdecl_model_file.name}» "
+                       f"({len(sat_points)} точек насыщения).")
+    else:
+        st.info("Наложение модели работает для пар X = Давление насыщения, "
+                "Y = Rs/Bo/μo — выберите такую пару выше (или пресеты "
+                "«Rs vs Pb», «Bo vs Pb», «μo vs Pb»).")
+
 fig.update_layout(
     title=f"{_axis_label(y_field)} vs {_axis_label(x_field)}",
     xaxis_title=_axis_label(x_field), yaxis_title=_axis_label(y_field),

@@ -30,6 +30,115 @@ def _fmt(x: float, width: int = 15, decimals: int = 6) -> str:
     return s.rjust(width)
 
 
+# ---------------------------------------------------------------------------
+# Обратная операция: разбор уже существующего .GRDECL — например, файла,
+# выгруженного из Fluid Model в Petrel/tNavigator, чтобы наложить ЕГО кривую
+# на фактические лабораторные точки того же горизонта (проверить, насколько
+# то, что заложено в модели, совпадает с лабораторией).
+# ---------------------------------------------------------------------------
+def _grdecl_section(lines: list[str], keyword: str) -> list[str]:
+    """Возвращает "сырые" строки данных одного ключевого слова GRDECL
+    (между строкой с keyword и завершающим "/"), пропуская комментарии."""
+    out = []
+    capture = False
+    for raw in lines:
+        s = raw.strip()
+        if s.startswith(keyword):
+            capture = True
+            continue
+        if not capture:
+            continue
+        if s.startswith("--"):
+            continue
+        if s == "/":
+            break
+        out.append(s)
+    return out
+
+
+def parse_fileunit(text: str) -> str:
+    """Возвращает единицы файла: 'METRIC', 'FIELD' или 'LAB' (как в Eclipse),
+    'METRIC' по умолчанию, если ключевое слово FILEUNIT не найдено."""
+    lines = text.splitlines()
+    section = _grdecl_section(lines, "FILEUNIT")
+    if not section:
+        return "METRIC"
+    return section[0].replace("/", "").strip().upper()
+
+
+def parse_pvto_saturation_curve(text: str) -> list[tuple[float, float, float, float]]:
+    """
+    Разбирает PVTO из текста .GRDECL и возвращает кривую точек насыщения —
+    ПЕРВУЮ строку каждой ветки Rs (это и есть Pb(Rs), т.к. первая точка любой
+    ветки PVTO всегда находится на давлении насыщения для этого Rs). Вместе
+    эти точки образуют ту самую кривую "Rs/Bo/μo от Pb", которую заложили
+    в модель через Fluid Model — её можно напрямую сравнивать с фактом.
+
+    Параметры
+    ---------
+    text : содержимое .GRDECL-файла целиком
+
+    Возвращает
+    ----------
+    points : список (Rs [м3/м3], Pb [бар], Bo [м3/м3], mu_o [сПз]),
+             отсортированный по возрастанию Pb; пустой список, если PVTO
+             не найден или не распознан
+    """
+    lines = text.splitlines()
+    capture = False
+    raw_rows = []
+    for raw in lines:
+        s = raw.strip()
+        if s.startswith("PVTO"):
+            capture = True
+            continue
+        if not capture:
+            continue
+        if s.startswith("--"):
+            continue
+        if s == "/":
+            break
+        raw_rows.append(s)
+
+    points = []
+    is_first_row_of_branch = True
+    for row in raw_rows:
+        nums_str = row.replace("/", "").split()
+        try:
+            nums = [float(x) for x in nums_str]
+        except ValueError:
+            continue
+        if len(nums) == 4:
+            rs, pb, bo, mu = nums
+            points.append((rs, pb, bo, mu))
+            is_first_row_of_branch = False
+        elif len(nums) == 3 and not is_first_row_of_branch:
+            # продолжение текущей ветки (уже выше Pb) — не точка насыщения,
+            # пропускаем
+            pass
+        if row.rstrip().endswith("/"):
+            is_first_row_of_branch = True
+
+    points.sort(key=lambda p: p[1])
+    return points
+
+
+def parse_pvdg_table(text: str) -> list[tuple[float, float, float]]:
+    """Разбирает PVDG из текста .GRDECL: список (P [бар], Bg [м3/м3], μg [сПз])."""
+    lines = text.splitlines()
+    section = _grdecl_section(lines, "PVDG")
+    points = []
+    for row in section:
+        nums_str = row.replace("/", "").split()
+        try:
+            nums = [float(x) for x in nums_str]
+        except ValueError:
+            continue
+        if len(nums) == 3:
+            points.append(tuple(nums))
+    return points
+
+
 def build_pvto_branches(
     rsb_field_m3m3: float, api: float, gamma_g: float, t_c: float, gamma_o: float,
     pb_fn, rs_fn, bo_fn,

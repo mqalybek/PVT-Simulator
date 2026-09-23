@@ -130,6 +130,70 @@ class TestFormatGrdecl:
         for kw in ("PVTW", "PVTO", "PVDG", "DENSITY", "FILEUNIT", "METRIC"):
             assert kw in text
 
+    def test_roundtrip_saturation_curve_matches_branch_start_points(self):
+        # То, что сами построили (build_*), должны сами же и распарсить
+        # обратно (parse_*) — иначе наложение "своей же" модели на факт
+        # покажет не то, что реально в файле
+        branches = pe.build_pvto_branches(
+            rsb_field_m3m3=114.0, api=API, gamma_g=GAMMA_G, t_c=T_C, gamma_o=GAMMA_O,
+            pb_fn=pvt.pb_standing, rs_fn=pvt.rs_standing, bo_fn=pvt.bo_standing,
+            rs_max_m3m3=120.0, n_branches=5, p_max_bar=500.0, n_points_per_branch=4,
+        )
+        pvdg = pe.build_pvdg_table(GAMMA_G, T_C, p_max_bar=500.0, n_points=3)
+        pvtw = pe.build_pvtw_record(142.0, T_C, salinity_ppm=250000)
+        text = pe.format_grdecl(pvtw, branches, pvdg, 798.0, 1157.9, 1.15)
+
+        parsed = pe.parse_pvto_saturation_curve(text)
+        assert len(parsed) == len(branches)
+        for (rs_expected, rows), (rs_parsed, pb_parsed, bo_parsed, mu_parsed) in zip(
+            branches, parsed
+        ):
+            pb_expected, bo_expected, mu_expected = rows[0]
+            assert rs_parsed == pytest.approx(rs_expected, rel=1e-3)
+            assert pb_parsed == pytest.approx(pb_expected, rel=1e-3)
+            assert bo_parsed == pytest.approx(bo_expected, rel=1e-3)
+            assert mu_parsed == pytest.approx(mu_expected, rel=1e-3)
+
+    def test_saturation_curve_sorted_by_pb(self):
+        branches = pe.build_pvto_branches(
+            rsb_field_m3m3=114.0, api=API, gamma_g=GAMMA_G, t_c=T_C, gamma_o=GAMMA_O,
+            pb_fn=pvt.pb_standing, rs_fn=pvt.rs_standing, bo_fn=pvt.bo_standing,
+            rs_max_m3m3=120.0, n_branches=6, p_max_bar=500.0, n_points_per_branch=3,
+        )
+        pvdg = pe.build_pvdg_table(GAMMA_G, T_C, p_max_bar=500.0, n_points=3)
+        pvtw = pe.build_pvtw_record(142.0, T_C, salinity_ppm=250000)
+        text = pe.format_grdecl(pvtw, branches, pvdg, 798.0, 1157.9, 1.15)
+        parsed = pe.parse_pvto_saturation_curve(text)
+        pb_values = [p[1] for p in parsed]
+        assert pb_values == sorted(pb_values)
+
+    def test_parse_fileunit_metric(self):
+        branches = pe.build_pvto_branches(
+            rsb_field_m3m3=114.0, api=API, gamma_g=GAMMA_G, t_c=T_C, gamma_o=GAMMA_O,
+            pb_fn=pvt.pb_standing, rs_fn=pvt.rs_standing, bo_fn=pvt.bo_standing,
+            rs_max_m3m3=120.0, n_branches=2, p_max_bar=500.0, n_points_per_branch=2,
+        )
+        pvdg = pe.build_pvdg_table(GAMMA_G, T_C, p_max_bar=500.0, n_points=2)
+        pvtw = pe.build_pvtw_record(142.0, T_C, salinity_ppm=250000)
+        text = pe.format_grdecl(pvtw, branches, pvdg, 798.0, 1157.9, 1.15)
+        assert pe.parse_fileunit(text) == "METRIC"
+
+    def test_parse_pvdg_table_roundtrip(self):
+        pvdg = pe.build_pvdg_table(GAMMA_G, T_C, p_max_bar=500.0, n_points=5)
+        branches = pe.build_pvto_branches(
+            rsb_field_m3m3=114.0, api=API, gamma_g=GAMMA_G, t_c=T_C, gamma_o=GAMMA_O,
+            pb_fn=pvt.pb_standing, rs_fn=pvt.rs_standing, bo_fn=pvt.bo_standing,
+            rs_max_m3m3=120.0, n_branches=2, p_max_bar=500.0, n_points_per_branch=2,
+        )
+        pvtw = pe.build_pvtw_record(142.0, T_C, salinity_ppm=250000)
+        text = pe.format_grdecl(pvtw, branches, pvdg, 798.0, 1157.9, 1.15)
+        parsed = pe.parse_pvdg_table(text)
+        assert len(parsed) == len(pvdg)
+        for (p1, bg1, mu1), (p2, bg2, mu2) in zip(pvdg, parsed):
+            assert p2 == pytest.approx(p1, rel=1e-4)
+            assert bg2 == pytest.approx(bg1, rel=1e-4)
+            assert mu2 == pytest.approx(mu1, rel=1e-4)
+
     def test_pvto_branch_count_matches_slash_terminators(self):
         branches = pe.build_pvto_branches(
             rsb_field_m3m3=114.0, api=API, gamma_g=GAMMA_G, t_c=T_C, gamma_o=GAMMA_O,
