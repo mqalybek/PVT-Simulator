@@ -26,7 +26,6 @@ import pvt_export as pex
 import pvt_tuning as pt
 import units as u
 
-st.set_page_config(page_title="Анализ месторождения — PVT", layout="wide")
 st.title("Анализ лабораторных PVT-данных по месторождению")
 st.caption(
     "Загрузите таблицу отборов проб (xlsx/csv) — программа попробует сама "
@@ -39,7 +38,19 @@ st.caption(
 uploaded = st.file_uploader("Файл с лабораторными PVT-данными (xlsx или csv)",
                              type=["xlsx", "xls", "csv"])
 
-if uploaded is None:
+# Streamlit размонтирует виджет file_uploader при переходе на другую страницу,
+# поэтому без явного кеша в session_state файл приходилось бы грузить заново
+# при каждом переключении между вкладками. Кешируем сырые байты сами.
+if uploaded is not None:
+    st.session_state["field_upload_bytes"] = uploaded.getvalue()
+    st.session_state["field_upload_name"] = uploaded.name
+elif "field_upload_bytes" in st.session_state:
+    st.info(f"Используется ранее загруженный файл: "
+            f"**{st.session_state['field_upload_name']}** "
+            f"(чтобы заменить — загрузите новый файл выше).")
+    uploaded = io.BytesIO(st.session_state["field_upload_bytes"])
+    uploaded.name = st.session_state["field_upload_name"]
+else:
     st.info("Загрузите файл, чтобы начать анализ.")
     st.stop()
 
